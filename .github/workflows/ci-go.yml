@@ -1,0 +1,56 @@
+name: Go CI & CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build
+        run: |
+          mkdir -p build
+          go build -o build/discordbot main.go gce.go
+
+      - name: Package binary
+        run: |
+          cd build
+          tar -czf discordbot-linux.tar.gz discordbot
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: discordbot-linux
+          path: build/discordbot-linux.tar.gz
+
+      - name: Set up SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy to ConoHa VPS
+        run: |
+          scp build/discordbot-linux.tar.gz ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/tmp/
+          ssh ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "\
+            mkdir -p ~/discordbot && \
+            tar -xzf /tmp/discordbot-linux.tar.gz -C ~/discordbot && \
+            rm /tmp/discordbot-linux.tar.gz && \
+            sudo systemctl restart discordbot.service"
